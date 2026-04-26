@@ -9,6 +9,7 @@ markdown resources in resources/. State written to output/<timestamp>/.
 
 from __future__ import annotations
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -217,7 +218,9 @@ def execute_tool(name: str, inputs: dict, run_dir: Path) -> str:
 
 # ── Agent loop ────────────────────────────────────────────────────────────────
 
-def run(request: str, model: str = "claude-opus-4-6", skill: str = "meal-planner") -> Path:
+DEFAULT_MODEL = os.environ.get("MODEL", "claude-opus-4-6")
+
+def run(request: str, model: str = DEFAULT_MODEL, skill: str = "meal-planner") -> Path:
     """Run the agent and return the run directory."""
     run_id  = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = _ROOT / "output" / run_id

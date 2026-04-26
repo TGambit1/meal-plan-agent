@@ -13,6 +13,7 @@ Usage:
 
 import base64
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -27,6 +28,7 @@ _ROOT      = Path(__file__).parent.parent
 _RECIPES   = _ROOT / "resources" / "recipes" / "book.md"
 _FRAMES    = 8   # how many frames to sample from the video
 _WHISPER   = "base"  # whisper model size: tiny | base | small | medium
+_MODEL     = os.environ.get("MODEL", "claude-opus-4-6")
 
 
 def download_video(url: str, out_dir: Path) -> Path:
@@ -134,7 +136,7 @@ Be exhaustive — include every ingredient shown or mentioned.
 """})
 
     response = client.messages.create(
-        model="claude-opus-4-6",
+        model=_MODEL,
         max_tokens=2048,
         messages=[{"role": "user", "content": content}],
     )
