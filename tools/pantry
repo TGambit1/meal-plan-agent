@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+"""pantry — read owned staples from resources/pantry/staples.md."""
+from pathlib import Path
+
+data = Path(__file__).parent.parent / "resources" / "pantry" / "staples.md"
+if not data.exists():
+    print("Error: resources/pantry/staples.md not found")
+    raise SystemExit(1)
+print(data.read_text())

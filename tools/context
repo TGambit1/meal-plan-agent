@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+"""context — return household profile from resources/household/profile.md."""
+from pathlib import Path
+
+data = Path(__file__).parent.parent / "resources" / "household" / "profile.md"
+if not data.exists():
+    print("Error: resources/household/profile.md not found")
+    raise SystemExit(1)
+print(data.read_text())

@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+"""
+save-recipe-video <url> [recipe-name]
+
+Downloads an Instagram/TikTok/YouTube video, extracts key frames + audio
+transcript, sends both to Claude to extract the recipe, then saves it to
+data/recipes.json under the family recipe book.
+
+Usage:
+    ./tools/save-recipe-video https://www.instagram.com/reel/...
+    ./tools/save-recipe-video https://www.tiktok.com/... "Grandma's Tacos"
+"""
+
+import base64
+import json
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+import anthropic
+import whisper
+
+_ROOT      = Path(__file__).parent.parent
+_RECIPES   = _ROOT / "resources" / "recipes" / "book.md"
+_FRAMES    = 8   # how many frames to sample from the video
+_WHISPER   = "base"  # whisper model size: tiny | base | small | medium
+
+
+def download_video(url: str, out_dir: Path) -> Path:
+    out = out_dir / "video.mp4"
+    result = subprocess.run(
+        ["yt-dlp", "-o", str(out), "--merge-output-format", "mp4",
+         "--quiet", "--no-warnings", url],
+        capture_output=True, text=True,
+    )
+    if not out.exists():
+        # yt-dlp sometimes names it differently
+        found = list(out_dir.glob("video.*"))
+        if not found:
+            print(f"Error downloading video: {result.stderr}", file=sys.stderr)
+            sys.exit(1)
+        out = found[0]
+    return out
+
+
+def extract_frames(video: Path, out_dir: Path, n: int) -> list[Path]:
+    """Extract n evenly-spaced frames as JPEGs."""
+    # Get duration
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", str(video)],
+        capture_output=True, text=True,
+    )
+    duration = float(probe.stdout.strip() or "30")
+    interval = max(1, duration / (n + 1))
+
+    frames = []
+    for i in range(1, n + 1):
+        ts = interval * i
+        out = out_dir / f"frame_{i:02d}.jpg"
+        subprocess.run(
+            ["ffmpeg", "-ss", str(ts), "-i", str(video),
+             "-vframes", "1", "-q:v", "2", str(out),
+             "-loglevel", "quiet"],
+            check=False,
+        )
+        if out.exists():
+            frames.append(out)
+    return frames
+
+
+def extract_audio(video: Path, out_dir: Path) -> Path:
+    out = out_dir / "audio.mp3"
+    subprocess.run(
+        ["ffmpeg", "-i", str(video), "-q:a", "0", "-map", "a",
+         str(out), "-loglevel", "quiet"],
+        check=False,
+    )
+    return out
+
+
+def transcribe(audio: Path) -> str:
+    if not audio.exists():
+        return ""
+    print("[save-recipe-video] Transcribing audio…")
+    model  = whisper.load_model(_WHISPER)
+    result = model.transcribe(str(audio))
+    return result.get("text", "").strip()
+
+
+def frame_to_b64(path: Path) -> str:
+    return base64.standard_b64encode(path.read_bytes()).decode()
+
+
+def extract_recipe_with_claude(frames: list[Path], transcript: str, hint: str) -> dict:
+    """Send frames + transcript to Claude, get back a structured recipe."""
+    client = anthropic.Anthropic()
+
+    content = []
+
+    if frames:
+        content.append({"type": "text", "text": f"Here are {len(frames)} frames from a cooking video:"})
+        for f in frames:
+            content.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/jpeg", "data": frame_to_b64(f)},
+            })
+
+    if transcript:
+        content.append({"type": "text", "text": f"\nVideo transcript:\n{transcript}"})
+
+    content.append({"type": "text", "text": f"""
+Extract the complete recipe from this cooking video.
+{"Hint about recipe name: " + hint if hint else ""}
+
+Return JSON only, no prose:
+{{
+  "name": "Recipe Name",
+  "default_servings": 2,
+  "source": "Instagram/TikTok",
+  "ingredients": [
+    {{"item": "ingredient name", "quantity": "amount"}},
+    ...
+  ],
+  "steps": ["Step 1...", "Step 2...", ...],
+  "notes": "any tips or notes from the video"
+}}
+
+For pantry staples (salt, pepper, oil, etc.) use "pantry" as the quantity.
+Be exhaustive — include every ingredient shown or mentioned.
+"""})
+
+    response = client.messages.create(
+        model="claude-opus-4-6",
+        max_tokens=2048,
+        messages=[{"role": "user", "content": content}],
+    )
+
+    text = response.content[0].text.strip()
+    m    = re.search(r"\{.*\}", text, re.DOTALL)
+    return json.loads(m.group()) if m else {}
+
+
+def save_to_recipes(recipe: dict) -> str:
+    """Append recipe to resources/recipes/book.md in markdown format. Returns the recipe name."""
+    name     = recipe.get("name", "Unknown Recipe")
+    servings = recipe.get("default_servings", "?")
+    source   = recipe.get("source", "")
+    notes    = recipe.get("notes", "")
+    steps    = recipe.get("steps", [])
+
+    rows = "\n".join(
+        f"| {ing.get('item', '')} | {ing.get('quantity', '')} |"
+        for ing in recipe.get("ingredients", [])
+    )
+    steps_block = "\n".join(f"{i+1}. {s}" for i, s in enumerate(steps)) if steps else ""
+
+    block = f"""
+## {name}
+
+- **Servings:** {servings}
+- **Source:** {source}
+{"- **Notes:** " + notes if notes else ""}
+
+### Ingredients
+
+| Item | Quantity |
+|------|----------|
+{rows}
+
+{"### Steps\n\n" + steps_block if steps_block else ""}
+---
+"""
+
+    existing = _RECIPES.read_text() if _RECIPES.exists() else ""
+    _RECIPES.write_text(existing.rstrip() + "\n" + block)
+    return name
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("usage: save-recipe-video <url> [recipe-name-hint]", file=sys.stderr)
+        sys.exit(1)
+
+    url  = sys.argv[1]
+    hint = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else ""
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+
+        print(f"[save-recipe-video] Downloading {url}…")
+        video = download_video(url, tmp_dir)
+        print(f"[save-recipe-video] Downloaded: {video.name}")
+
+        print(f"[save-recipe-video] Extracting {_FRAMES} frames…")
+        frames = extract_frames(video, tmp_dir, _FRAMES)
+        print(f"[save-recipe-video] Got {len(frames)} frames.")
+
+        audio      = extract_audio(video, tmp_dir)
+        transcript = transcribe(audio)
+        if transcript:
+            print(f"[save-recipe-video] Transcript ({len(transcript)} chars).")
+
+        print("[save-recipe-video] Sending to Claude…")
+        recipe = extract_recipe_with_claude(frames, transcript, hint)
+
+        if not recipe:
+            print("Error: could not extract recipe from video.", file=sys.stderr)
+            sys.exit(1)
+
+        name = save_to_recipes(recipe)
+        print(f"Saved: {name} → resources/recipes/book.md")
+
+
+if __name__ == "__main__":
+    main()

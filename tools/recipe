@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+"""recipe <name> — look up a family recipe by name from resources/recipes/book.md.
+Prints the matching recipe section, or a not-found message if absent."""
+import re
+import sys
+from pathlib import Path
+
+if len(sys.argv) < 2:
+    print("usage: recipe <name>", file=sys.stderr)
+    sys.exit(1)
+
+query = " ".join(sys.argv[1:]).lower().strip()
+book  = Path(__file__).parent.parent / "resources" / "recipes" / "book.md"
+
+if not book.exists():
+    print(f"not found: {query} (no recipe book)")
+    sys.exit(0)
+
+text = book.read_text()
+
+# Split on "## " headings (each recipe is a level-2 section)
+sections = re.split(r"\n(?=## )", text)
+match = None
+for section in sections:
+    header = re.match(r"## (.+)", section)
+    if header and query in header.group(1).lower():
+        match = section.strip()
+        break
+
+if not match:
+    print(f"not found: {query}")
+    sys.exit(0)
+
+print(match)
