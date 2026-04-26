@@ -1,6 +1,6 @@
 # Meal Plan Agent
 
-A Claude-powered household meal planning agent built on the OpenClaw workspace architecture. Give it a request in plain English and it produces a full weekly meal plan and grouped grocery list — priced, categorized, and within your household budget.
+A household meal planning agent built on the OpenClaw workspace architecture. Give it a request in plain English and it produces a full weekly meal plan and grouped grocery list — priced, categorized, and within your household budget.
 
 ## How it works
 
@@ -28,7 +28,7 @@ pip install openai-whisper
 # Generate a meal plan
 python3 run.py 'Plan meals for the week'
 python3 run.py 'Taco night, salmon, something easy Friday'
-python3 run.py 'Quick weeknight dinners' --model claude-sonnet-4-6
+python3 run.py 'Quick weeknight dinners' --model sonnet
 
 # Save a recipe from a video
 python3 run.py save-recipe https://www.instagram.com/reel/...
@@ -85,7 +85,7 @@ meal-plan-agent/
 
 ## Plugging into Homebaseuxv12
 
-Add this repo as a git submodule in Homebaseuxv12 and create `grocery-meal-planner.tsx` in the Supabase edge function. The workspace files load into the Claude system prompt at runtime. `web-chat.tsx` already detects grocery intent and routes to `/make-server-8c22500c/meals/chat` — the submodule wires up that endpoint.
+Add this repo as a git submodule in Homebaseuxv12 and create `grocery-meal-planner.tsx` in the Supabase edge function. The workspace files load into the agent system prompt at runtime. `web-chat.tsx` already detects grocery intent and routes to `/make-server-8c22500c/meals/chat` — the submodule wires up that endpoint.
 
 ```bash
 git submodule add https://github.com/TGambit1/meal-plan-agent meal-agent
